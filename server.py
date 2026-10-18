@@ -5,6 +5,7 @@ Run auth.py once first. Dates are YYYY-MM-DD; default range is the last 28 days.
 import csv
 import io
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -18,7 +19,10 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from mcp.server.mcpserver import MCPServer
 
-TOKEN = Path.home() / ".config" / "youtube-analytics-mcp" / "token.json"
+# One server process per channel: YT_PROFILE selects which channel's sign-in to use
+# (empty = main channel -> token.json, "freedom" -> token-freedom.json).
+PROFILE = os.environ.get("YT_PROFILE", "").strip()
+TOKEN = Path.home() / ".config" / "youtube-analytics-mcp" / (f"token-{PROFILE}.json" if PROFILE else "token.json")
 SCOPES = [
     "https://www.googleapis.com/auth/yt-analytics.readonly",
     "https://www.googleapis.com/auth/youtube.readonly",
@@ -29,7 +33,8 @@ CORE_METRICS = (
 )
 
 HERE = Path(__file__).parent
-REAUTH = f"Google sign-in expired or revoked. Fix: cd {HERE} && .venv/bin/python auth.py"
+AUTH_CMD = f"cd {HERE} && .venv/bin/python auth.py" + (f" --profile {PROFILE}" if PROFILE else "")
+REAUTH = f"Google sign-in expired or revoked. Fix: {AUTH_CMD}"
 REPORT_CACHE = Path.home() / ".cache" / "youtube-analytics-mcp" / "reports"
 
 mcp = MCPServer("youtube")
@@ -37,7 +42,7 @@ mcp = MCPServer("youtube")
 
 def _creds():
     if not TOKEN.exists():
-        raise RuntimeError(f"Not signed in. Fix: cd {HERE} && .venv/bin/python auth.py")
+        raise RuntimeError(f"Not signed in. Fix: {AUTH_CMD}")
     creds = Credentials.from_authorized_user_file(str(TOKEN), SCOPES)
     if not creds.valid:
         try:
@@ -54,12 +59,11 @@ def auth_status() -> dict:
     alert the user with the `fix` command instead of producing a report full of gaps."""
     try:
         ch = _data().channels().list(part="snippet", mine=True).execute()["items"][0]
-        return {"ok": True, "channel": ch["snippet"]["title"], "channelId": ch["id"],
+        return {"ok": True, "profile": PROFILE or "main", "channel": ch["snippet"]["title"], "channelId": ch["id"],
                 "token_saved": datetime.fromtimestamp(TOKEN.stat().st_mtime).isoformat(timespec="minutes"),
                 "api_key": API_KEY.exists()}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:300],
-                "fix": f"cd {HERE} && .venv/bin/python auth.py"}
+        return {"ok": False, "profile": PROFILE or "main", "error": str(e)[:300], "fix": AUTH_CMD}
 
 
 def _analytics():
