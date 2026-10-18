@@ -148,13 +148,37 @@ def retention_curve(video_id: str, start_date: str = "2005-02-14", end_date: str
                   dimensions="elapsedVideoTimeRatio", filters=f"video=={video_id}")
 
 
+# API traffic-source names -> the labels YouTube Studio shows (the API's names mislead, e.g. SUBSCRIBER).
+STUDIO_LABELS = {
+    "SUBSCRIBER": "Browse features (Home feed, Subscriptions) — NOT only subscribers",
+    "RELATED_VIDEO": "Suggested videos", "YT_SEARCH": "YouTube search", "SHORTS": "Shorts feed",
+    "EXT_URL": "External (websites, apps, social links)", "NO_LINK_OTHER": "Direct or unknown",
+    "YT_CHANNEL": "Channel pages", "YT_OTHER_PAGE": "Other YouTube features", "PLAYLIST": "Playlists",
+    "NOTIFICATION": "Notifications", "END_SCREEN": "End screens", "ANNOTATION": "Cards",
+    "HASHTAGS": "Hashtag pages", "ADVERTISING": "YouTube ads", "LIVE_REDIRECT": "Live redirect",
+    "YT_PLAYLIST_PAGE": "Playlist pages", "SOUND_PAGE": "Sound pages", "CAMPAIGN_CARD": "Campaign cards",
+}
+
+
 @mcp.tool()
 def traffic_sources(start_date: str = "", end_date: str = "", video_id: str = "") -> dict:
-    """Where views come from (search, suggested, browse, Shorts feed, external...). Channel-wide or per video."""
+    """Where views come from, with YouTube Studio's label for each source. Channel-wide or per video."""
     kw = {"dimensions": "insightTrafficSourceType", "sort": "-views"}
     if video_id:
         kw["filters"] = f"video=={video_id}"
-    return _query(start_date, end_date, "views,estimatedMinutesWatched", **kw)
+    res = _query(start_date, end_date, "views,estimatedMinutesWatched", **kw)
+    for r in res["rows"]:
+        r["studio_label"] = STUDIO_LABELS.get(r["insightTrafficSourceType"], r["insightTrafficSourceType"])
+    return res
+
+
+@mcp.tool()
+def traffic_source_detail(source: str, start_date: str = "", end_date: str = "", limit: int = 15) -> dict:
+    """Drill into one traffic source: e.g. EXT_URL -> which websites/apps (instagram.com, t.co = X),
+    SUBSCRIBER -> which browse surface ('what-to-watch' = Home feed), RELATED_VIDEO -> which videos,
+    YT_SEARCH -> search terms. (Not supported by Google for NO_LINK_OTHER.)"""
+    return _query(start_date, end_date, "views,estimatedMinutesWatched", dimensions="insightTrafficSourceDetail",
+                  filters=f"insightTrafficSourceType=={source.upper()}", sort="-views", maxResults=min(limit, 25))
 
 
 @mcp.tool()
